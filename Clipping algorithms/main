@@ -1,0 +1,246 @@
+import glfw
+from OpenGL.GL import *
+import random
+
+
+class Point:
+    #Класс для представления точки в 2D пространстве
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+
+class Line:
+    def __init__(self, p1, p2):
+        self.start = p1
+        self.end = p2
+
+    def get_normal(self):
+        dx = self.end.x - self.start.x
+        dy = self.end.y - self.start.y
+        return Line(Point(-dy, dx), Point(dy, -dx))
+
+
+# Параметры окна
+window_width = 640
+window_height = 640
+
+polygon_points = []
+
+# Список точек для построения отрезков
+line_points = []
+
+# Размер буфера для хранения данных
+buf_size = window_width * window_height * 3
+
+# Буфер для хранения данных
+buffer = []
+
+# Флаг для включения/отключения отсечения
+clipping = 0
+
+
+def main():
+    # Инициализация GLFW
+    if not glfw.init():
+        return
+
+    window = glfw.create_window(window_width, window_height, "Lab5", None, None)
+    if not window:
+        glfw.terminate()
+        return
+
+    glfw.make_context_current(window)
+
+    # Установка обработчиков событий
+    glfw.set_mouse_button_callback(window, mouse_callback)
+    glfw.set_key_callback(window, key_callback)
+    glfw.set_window_size_callback(window, resize_callback)
+
+    glLineWidth(3)  # Толщина линии
+    glPointSize(3)  # Размер точки
+    glClearColor(0.0, 0.0, 0.0, 1.0)  # Цвет фона
+
+    make_lines()
+
+    # Цикл отрисовки
+    while not glfw.window_should_close(window):
+    
+        display()
+
+        glfw.swap_buffers(window)
+
+        glfw.poll_events()
+
+    glfw.destroy_window(window)
+    glfw.terminate()
+
+
+def make_lines():
+    #Генерирация случайных отрезков
+    n = 10
+    for i in range(n * 2):
+        x = round(2 * random.random() - 1, 1)
+        y = round(2 * random.random() - 1, 1)
+        line_points.append(Point(x, y))
+
+
+def clear():
+    global clipping, polygon_points, line_points
+    clipping = 0
+    polygon_points = []
+    line_points = []
+    make_lines()
+
+
+def scalar_product(v1, v2):
+    #Вычисляет скалярное произведение двух векторов
+    x1 = v1.end.x - v1.start.x
+    x2 = v2.end.x - v2.start.x
+    y1 = v1.end.y - v1.start.y
+    y2 = v2.end.y - v2.start.y
+    return x1 * x2 + y1 * y2
+
+
+def display():
+    glClear(GL_COLOR_BUFFER_BIT)
+
+    glColor3f(0.2, 0.2, 0.5)
+
+    draw_lines()
+
+    glColor3f(0.5, 0.2, 0.3)
+
+    # Отрисовка многоугольника
+    draw_polygon(polygon_points)
+
+
+def draw_lines():
+    glBegin(GL_LINES)
+    n = len(line_points)
+    if not clipping:
+        # Отрисовка всех отрезков
+        for point in line_points:
+            glVertex2f(point.x, point.y)
+    else:
+        # Отрисовка отрезков с отсечением
+        for i in range(0, n, 2):
+            line = Line(line_points[i], line_points[i + 1])
+            res = clip(line, polygon_points)
+            for point in res:
+                glVertex2f(point.x, point.y)
+    glEnd()
+
+
+def draw_polygon(points):
+    if len(points) == 1:
+        # Отрисовка точки
+        glBegin(GL_POINTS)
+        glVertex2f(points[0].x, points[0].y)
+        glEnd()
+    else:
+        glBegin(GL_LINE_LOOP)
+        for point in points:
+            glVertex2f(point.x, point.y)
+        glEnd()
+
+
+def sign(a):
+    if a < 0:
+        return -1
+    elif a == 0:
+        return 0
+    else:
+        return 1
+
+
+# Функция clip выполняет отсечение отрезка
+def clip(line, polygon):
+    n = len(polygon)
+
+    # Список точек пересечения
+    intersections = []
+
+    line_normal = line.get_normal()
+
+    # Проверка пересечения с каждым ребром многоугольника
+    for i in range(n):
+        edge = Line(polygon[i], polygon[(i + 1) % n])
+        sign_1 = sign(scalar_product(line_normal, Line(line.start, edge.start)))
+        sign_2 = sign(scalar_product(line_normal, Line(line.start, edge.end)))
+
+        if sign_1 != sign_2:
+            # Нормаль к ребру
+            normal = edge.get_normal()
+
+            # Вычисление параметра пересечения
+            D_N = scalar_product(line, normal)
+            W_N = scalar_product(Line(edge.start, line.start), normal)
+            t = -W_N / D_N
+
+            # Ограничение параметра в диапазоне [0, 1]
+            if t < 0:
+                t = 0
+            if t > 1:
+                t = 1
+
+            # Вычисление точки пересечения
+            x = line.start.x + (line.end.x - line.start.x) * t
+            y = line.start.y + (line.end.y - line.start.y) * t
+            intersections.append(Point(x, y))
+
+    intersections.append(line.start)
+    intersections.append(line.end)
+
+    # Сортировка точек пересечения по координате x (или y, если точки лежат на одной вертикали)
+    if line.start.x != line.end.x:
+        intersections = sorted(intersections, key=lambda point: point.x)
+    else:
+        intersections = sorted(intersections, key=lambda point: point.y)
+
+    # Возвращение отрезков после отсечения
+    return intersections
+
+
+def mouse_callback(window, button, action, mods):
+    global polygon_points, clipping
+
+    # Получение координат курсора мыши
+    pos = glfw.get_cursor_pos(window)
+
+    # Обработка нажатия правой кнопки мыши
+    if action == glfw.PRESS:
+        if button == glfw.MOUSE_BUTTON_RIGHT:
+            # Включение/отключение отсечения
+            clipping += 1
+            clipping %= 2
+
+        # Обработка нажатия левой кнопки мыши
+        if button == glfw.MOUSE_BUTTON_LEFT:
+            # Перевод координат курсора в диапазон [-1, 1]
+            x = 2 * pos[0] / window_width - 1
+            y = - 2 * pos[1] / window_height + 1
+            polygon_points.append(Point(x, y))
+
+
+def key_callback(window, key, scancode, action, mode):
+    #Обработчик события нажатия клавиши
+    if action == glfw.PRESS:
+        # Обработка клавиши Escape
+        if key == glfw.KEY_ESCAPE:
+            glfw.set_window_should_close(window, 1)
+
+        # Обработка клавиши C
+        if key == glfw.KEY_C:
+            clear()
+
+
+def resize_callback(window, width, height):
+    #Обработчик события изменения размеров окна
+    global window_width, window_height
+    window_width, window_height = width, height
+    glViewport(0, 0, width, height)
+    clear()
+
+
+main()
